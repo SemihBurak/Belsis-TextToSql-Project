@@ -1,0 +1,18 @@
+# Core
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+
+# LLM - Google AI Studio
+google-generativeai>=0.3.0
+
+# Vector DB & Embeddings
+chromadb>=0.4.18
+sentence-transformers>=2.2.2
+
+# Database
+sqlparse>=0.4.4
+
+# CORS
+python-multipart>=0.0.6

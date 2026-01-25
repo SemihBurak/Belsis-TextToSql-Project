@@ -1,0 +1,34 @@
+# Large database files
+*.sqlite
+
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.egg-info/
+*.egg
+
+# Node
+node_modules/
+dist/
+.npm
+
+# IDE
+.vscode/
+.idea/
+
+# Cache
+.cache/
+*.log
+
+# ChromaDB data
+backend/data/chroma_db/
+backend/data/schema_cache/
