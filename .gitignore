@@ -1,5 +1,7 @@
 # Large database files
-*.sqlite
+# *.sqlite  - commented out to allow TURSpider database files
+# But include TURSpider database files
+!TURSpider database/
 
 # Environment variables
 .env
