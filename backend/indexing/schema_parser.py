@@ -1,7 +1,7 @@
 import sqlite3
 import json
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 
 import sys
@@ -15,7 +15,7 @@ class ColumnInfo:
     type: str
     is_primary_key: bool
     is_foreign_key: bool
-    references: str | None = None
+    references: Optional[str] = None
 
 
 @dataclass
@@ -71,7 +71,7 @@ class DatabaseSchema:
         return "\n".join(lines)
 
 
-def parse_database_schema(db_path: Path) -> DatabaseSchema | None:
+def parse_database_schema(db_path: Path) -> Optional[DatabaseSchema]:
     """Parse schema from a single SQLite database."""
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -176,7 +176,7 @@ def save_schemas_to_cache(schemas: Dict[str, DatabaseSchema]) -> None:
     print(f"Saved {len(schemas)} schemas to {cache_file}")
 
 
-def load_schemas_from_cache() -> Dict[str, DatabaseSchema] | None:
+def load_schemas_from_cache() -> Optional[Dict[str, DatabaseSchema]]:
     """Load schemas from cache if available."""
     cache_file = SCHEMA_CACHE_DIR / "schemas.json"
 
