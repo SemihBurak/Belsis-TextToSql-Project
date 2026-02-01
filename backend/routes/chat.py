@@ -20,6 +20,48 @@ from config import TOP_K_CANDIDATES
 router = APIRouter()
 
 
+def calculate_confidence_score(
+    similarity: float,
+    sql_valid: bool,
+    execution_success: bool,
+    row_count: int
+) -> float:
+    """
+    Calculate confidence score based on multiple factors.
+
+    Returns:
+        float: Confidence score between 0 and 100
+    """
+    # Weights for each factor
+    SIMILARITY_WEIGHT = 0.5  # 50% - Most important
+    SQL_VALIDITY_WEIGHT = 0.2  # 20%
+    EXECUTION_WEIGHT = 0.2  # 20%
+    RESULT_WEIGHT = 0.1  # 10%
+
+    # Similarity score (0-1) -> (0-100)
+    similarity_score = similarity * 100
+
+    # SQL validity score
+    sql_score = 100 if sql_valid else 0
+
+    # Execution success score
+    execution_score = 100 if execution_success else 0
+
+    # Result score (has results)
+    result_score = 100 if row_count > 0 else 50  # 50 points even if no results (query might be correct)
+
+    # Weighted average
+    confidence = (
+        similarity_score * SIMILARITY_WEIGHT +
+        sql_score * SQL_VALIDITY_WEIGHT +
+        execution_score * EXECUTION_WEIGHT +
+        result_score * RESULT_WEIGHT
+    )
+
+    # Clamp between 0 and 100
+    return max(0.0, min(100.0, confidence))
+
+
 class ChatRequest(BaseModel):
     question: str
 
@@ -32,6 +74,8 @@ class ChatResponse(BaseModel):
     columns: List[str]
     rows: List[List[Any]]
     row_count: int
+    explanation: str = ""  # Açıklama metni
+    confidence_score: float = 0.0  # Güven skoru (0-100)
     error: str = ""
     detection_info: Dict[str, Any] = {}
     timing: Dict[str, float] = {}
@@ -41,7 +85,7 @@ class ChatResponse(BaseModel):
 async def chat(request: ChatRequest):
     """
     Process a Turkish natural language question and return SQL query results.
-    
+
     OPTIMIZED Flow (Single LLM Call):
     1. Semantic search for candidate databases
     2. Combined LLM call: Select DB + Generate SQL
@@ -53,6 +97,32 @@ async def chat(request: ChatRequest):
 
     if not question:
         raise HTTPException(status_code=400, detail="Soru boş olamaz.")
+
+    # Check if question contains modification keywords (DELETE, UPDATE, INSERT, etc.)
+    question_upper = question.upper()
+    modification_keywords = [
+        "SİL", "SILL", "DELETE", "KALDIR",
+        "GÜNCELLE", "UPDATE", "DEĞİŞTİR",
+        "EKLE", "INSERT", "KAYDET", "YAZ",
+        "OLUŞTUR", "CREATE", "YAP",
+        "DROP", "DÜŞÜR"
+    ]
+
+    for keyword in modification_keywords:
+        if keyword in question_upper:
+            return ChatResponse(
+                success=False,
+                question=question,
+                database="",
+                sql="",
+                columns=[],
+                rows=[],
+                row_count=0,
+                confidence_score=0.0,  # Low confidence for blocked queries
+                error="Üzgünüm, sadece veri sorgulama işlemlerini destekliyorum. Veri ekleme, güncelleme veya silme işlemleri yapamam. Başka nasıl yardımcı olabilirim?",
+                detection_info={},
+                timing={"detection": 0, "generation": 0, "execution": 0, "total": time.time() - total_start}
+            )
 
     try:
         # Step 1: Semantic search for candidates
@@ -95,10 +165,16 @@ async def chat(request: ChatRequest):
         
         print(f"⏱️  [Step 1+2] DB Detection + SQL Generation: {step1_time:.2f}s")
 
-        # Check if LLM indicated data is not available
-        if sql.startswith("VERI_YOK"):
-            error_msg = sql.replace("VERI_YOK:", "").strip()
+        # Check if question is unclear/ambiguous
+        if sql.startswith("BELIRSIZ"):
+            clarification = sql.replace("BELIRSIZ:", "").strip()
             total_time = time.time() - total_start
+            confidence = calculate_confidence_score(
+                similarity=selected['similarity'],
+                sql_valid=False,
+                execution_success=False,
+                row_count=0
+            )
             return ChatResponse(
                 success=False,
                 question=question,
@@ -107,6 +183,58 @@ async def chat(request: ChatRequest):
                 columns=[],
                 rows=[],
                 row_count=0,
+                explanation="",
+                confidence_score=confidence,
+                error=f"❓ Sorunuz biraz belirsiz. {clarification}",
+                detection_info=detection_info,
+                timing={"detection": search_time, "generation": llm_time, "execution": 0, "total": total_time}
+            )
+
+        # Check if question is irrelevant
+        if sql.startswith("ALAKASIZ"):
+            suggestion = sql.replace("ALAKASIZ:", "").strip()
+            total_time = time.time() - total_start
+            confidence = calculate_confidence_score(
+                similarity=selected['similarity'],
+                sql_valid=False,
+                execution_success=False,
+                row_count=0
+            )
+            return ChatResponse(
+                success=False,
+                question=question,
+                database=db_name,
+                sql="",
+                columns=[],
+                rows=[],
+                row_count=0,
+                explanation="",
+                confidence_score=confidence,
+                error=f"Sanırım sorunuzu tam anlayamadım. Şunu mu sormak istediniz: '{suggestion}'? Veya bu konuda size nasıl yardımcı olabilirim?",
+                detection_info=detection_info,
+                timing={"detection": search_time, "generation": llm_time, "execution": 0, "total": total_time}
+            )
+
+        # Check if LLM indicated data is not available
+        if sql.startswith("VERI_YOK"):
+            error_msg = sql.replace("VERI_YOK:", "").strip()
+            total_time = time.time() - total_start
+            confidence = calculate_confidence_score(
+                similarity=selected['similarity'],
+                sql_valid=False,
+                execution_success=False,
+                row_count=0
+            )
+            return ChatResponse(
+                success=False,
+                question=question,
+                database=db_name,
+                sql="",
+                columns=[],
+                rows=[],
+                row_count=0,
+                explanation="",
+                confidence_score=confidence,
                 error=f"Bu veritabanında istenen bilgi bulunamadı: {error_msg}",
                 detection_info=detection_info,
                 timing={"detection": search_time, "generation": llm_time, "execution": 0, "total": total_time}
@@ -116,6 +244,12 @@ async def chat(request: ChatRequest):
         is_valid, error = validate_sql(sql)
         if not is_valid:
             total_time = time.time() - total_start
+            confidence = calculate_confidence_score(
+                similarity=selected['similarity'],
+                sql_valid=False,
+                execution_success=False,
+                row_count=0
+            )
             return ChatResponse(
                 success=False,
                 question=question,
@@ -124,6 +258,8 @@ async def chat(request: ChatRequest):
                 columns=[],
                 rows=[],
                 row_count=0,
+                explanation="",
+                confidence_score=confidence,
                 error=error,
                 detection_info=detection_info,
                 timing={"detection": search_time, "generation": llm_time, "execution": 0, "total": total_time}
@@ -141,6 +277,12 @@ async def chat(request: ChatRequest):
         print(f"    └─ Breakdown: Search={search_time:.2f}s | LLM={llm_time:.2f}s | Execution={step3_time:.2f}s")
 
         if not exec_result["success"]:
+            confidence = calculate_confidence_score(
+                similarity=selected['similarity'],
+                sql_valid=is_valid,
+                execution_success=False,
+                row_count=0
+            )
             return ChatResponse(
                 success=False,
                 question=question,
@@ -149,12 +291,37 @@ async def chat(request: ChatRequest):
                 columns=[],
                 rows=[],
                 row_count=0,
+                explanation="",
+                confidence_score=confidence,
                 error=exec_result["error"],
                 detection_info=detection_info,
                 timing={"detection": search_time, "generation": llm_time, "execution": step3_time, "total": total_time}
             )
 
-        # Step 4: Return success response
+        # Step 4: Generate explanation
+        explanation_start = time.time()
+        explanation = llm.generate_explanation(
+            question=question,
+            sql=sql,
+            row_count=exec_result["row_count"],
+            db_name=db_name
+        )
+        explanation_time = time.time() - explanation_start
+        print(f"⏱️  [Step 4] Explanation Generation: {explanation_time:.2f}s")
+
+        total_time = time.time() - total_start
+        print(f"⏱️  [TOTAL] {total_time:.2f}s ✅")
+        print(f"    └─ Breakdown: Search={search_time:.2f}s | LLM={llm_time:.2f}s | Execution={step3_time:.2f}s | Explanation={explanation_time:.2f}s")
+
+        # Step 5: Calculate confidence score
+        confidence = calculate_confidence_score(
+            similarity=selected['similarity'],
+            sql_valid=is_valid,
+            execution_success=True,
+            row_count=exec_result["row_count"]
+        )
+
+        # Step 6: Return success response
         return ChatResponse(
             success=True,
             question=question,
@@ -163,6 +330,8 @@ async def chat(request: ChatRequest):
             columns=exec_result["columns"],
             rows=exec_result["rows"],
             row_count=exec_result["row_count"],
+            explanation=explanation,
+            confidence_score=confidence,
             error="",
             detection_info=detection_info,
             timing={"detection": search_time, "generation": llm_time, "execution": step3_time, "total": total_time}

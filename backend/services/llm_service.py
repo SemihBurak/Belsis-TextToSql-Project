@@ -15,7 +15,7 @@ class LLMService:
         genai.configure(api_key=GOOGLE_API_KEY)
         self.model = genai.GenerativeModel(GEMMA_MODEL)
 
-    def generate(self, prompt: str, temperature: float = 0.1) -> str:
+    def generate(self, prompt: str, temperature: float = 0.0) -> str:
         """Generate response from LLM."""
         try:
             response = self.model.generate_content(
@@ -106,23 +106,100 @@ Sadece veritabanı ismini yaz, başka bir şey yazma. Örnek: şarkıcı"""
 ## Kullanıcı Sorusu:
 {question}
 
-## Kurallar:
+## ZORUNLU ADIMLAR (İÇİNDE TAKİP ET, KULLANICIYA GÖSTERME):
+ADIM 1: Soruda geçen TÜM anahtar kelimeleri/kavramları listele (sadece zihninde)
+ADIM 2: Her kavram için şemadaki sütunlarda TAM EŞLEŞMEYİ kontrol et (sadece zihninde)
+ADIM 3: Eğer HERHANGI BIR kavram şemada YOKSA veya FARKLI bir kelimeyse -> BELIRSIZ dön (kullanıcıya sadece düzeltilmiş soruyu öner, teknik detay verme)
+ADIM 4: Eğer tüm kavramlar eşleşiyorsa -> SQL oluştur
+
+ÖNEMLİ: Bu adımları kullanıcıya ASLA gösterme! Sadece BELIRSIZ durumunda kısa ve net bir öneri ver.
+
+## KATKI SEMANTİK KURALLAR (ASLA İHLAL ETME):
+❌ YANLIŞ ÖRNEKLER (ASLA YAPMA):
+1. Soru: "Bankadaki mal varlığı en yüksek kimdir?"
+   → Şemada "banka", "bankadaki", "mal varlığı" kelimesi YOK, sadece "öz_varlık" var
+   → "bankadaki mal varlığı" ≠ "öz_varlık" (FARKLI KAVRAMLAR!)
+   → DOĞRU CEVAP: BELIRSIZ: Serveti en yüksek sanatçı kimdir?
+   → YANLIŞ CEVAP: SELECT ... ORDER BY öz_varlık (BU HALÜSINASYON!)
+   → YANLIŞ CEVAP: Teknik adımları/şema detaylarını göstermek (KULLANICIYA TEKNİK DETAY VERME!)
+
+2. Soru: "Banka hesabındaki para miktarı en yüksek kimdir?"
+   → Şemada "banka", "hesap", "para" kelimesi YOK
+   → DOĞRU CEVAP: BELIRSIZ: Ne sormak istediniz?
+   → YANLIŞ CEVAP: Herhangi bir SQL üretmek (BU HALÜSINASYON!)
+
+3. Soru: "Banka bakiyesi en yüksek kimdir?"
+   → Şemada "banka", "bakiye" kelimesi YOK
+   → DOĞRU CEVAP: BELIRSIZ: Lütfen sorunuzu daha net belirtin.
+   → YANLIŞ CEVAP: SQL üretmek (BU HALÜSINASYON!)
+
+4. Soru: "Maaşı en yüksek kimdir?" (ama şemada "maaş" yok, sadece "gelir" var)
+   → Şemada "maaş" YOK, sadece "gelir" var
+   → "maaş" ≠ "gelir" (benzer ama AYNI DEĞİL!)
+   → DOĞRU CEVAP: BELIRSIZ: Geliri en yüksek olanı mı sormak istediniz?
+   → YANLIŞ CEVAP: SELECT ... ORDER BY gelir (BU HALÜSINASYON!)
+
+✅ DOĞRU ÖRNEKLER:
+1. Soru: "Serveti en yüksek sanatçı kimdir?"
+   → Şemada "öz_varlık" VAR
+   → "servet" = "öz_varlık" (EŞ ANLAMLI, şemada var)
+   → DOĞRU: SELECT isim FROM şarkıcı ORDER BY öz_varlık DESC LIMIT 1;
+
+2. Soru: "Öz varlığı en yüksek kimdir?"
+   → Şemada "öz_varlık" VAR
+   → "öz varlığı" = "öz_varlık" (TAM EŞLEŞİYOR)
+   → DOĞRU: SELECT isim FROM şarkıcı ORDER BY öz_varlık DESC LIMIT 1;
+
+## Ek Kurallar:
 - SADECE SELECT sorgusu üret
 - Tablo ve sütun isimlerini şemadaki gibi AYNEN kullan (Türkçe karakterler: ş, ı, ö, ü, ç, ğ)
-- Şemada olmayan tablo/sütun KULLANMA
-- Eğer istenen bilgi hiçbir şemada YOKSA: "VERI_YOK: [açıklama]" yaz
+- ÖNEMLİ: Şemada OLMAYAN tablo veya sütun ASLA KULLANMA. Uydurma, varsayma!
+- ÖNEMLİ: Birden fazla tablo gerekiyorsa MUTLAKA JOIN kullan (INNER JOIN, LEFT JOIN vb.)
+- Kabul edilebilir genel eş anlamlılar: satış≈sipariş, müşteri≈alıcı, ürün≈mal, isim≈ad, sayı≈miktar≈adet, servet≈öz_varlık
+- UYARI: Eş anlamlılar dışındaki tüm kavramlar şemadaki KELIMELERLE TAM EŞLEŞMELİ!
 
 ## Cevap Formatı (bu formatı AYNEN kullan):
 VERITABANI: [veritabanı_ismi]
-SQL: [sql_sorgusu]"""
+SQL: [sql_sorgusu]
+
+VEYA belirsizse (TERCIH ET!):
+BELIRSIZ: [Düzeltilmiş soru önerin - kısa ve net, teknik detay YOK]
+Örnek: BELIRSIZ: Serveti en yüksek sanatçı kimdir?
+
+VEYA alakasız soruysa:
+ALAKASIZ: [önerilen yorum]"""
 
         response = self.generate(prompt)
-        
+
+        # Check if question is unclear/ambiguous
+        if "BELIRSIZ" in response.upper():
+            # Extract the clarification question
+            clarification = response
+            if ":" in response:
+                clarification = response.split(":", 1)[1].strip()
+            return {
+                "selected": candidates[0],
+                "sql": f"BELIRSIZ: {clarification}",
+                "db_name": candidates[0]['name']
+            }
+
+        # Check if question is irrelevant
+        if "ALAKASIZ" in response.upper() or "ALAKASIZ:" in response.upper():
+            # Extract the suggestion
+            suggestion = response
+            if ":" in response:
+                suggestion = response.split(":", 1)[1].strip()
+            return {
+                "selected": candidates[0],
+                "sql": f"ALAKASIZ: {suggestion}",
+                "db_name": candidates[0]['name']
+            }
+
         # Parse response
         lines = response.strip().split('\n')
         db_name = None
         sql = None
-        
+
         for line in lines:
             line = line.strip()
             if line.upper().startswith('VERITABANI:') or line.upper().startswith('VERİTABANI:'):
@@ -186,24 +263,86 @@ SQL: [sql_sorgusu]"""
 ## Veritabanı Şeması:
 {schema_sql}
 
-## Kurallar:
+## ZORUNLU ADIMLAR (İÇİNDE TAKİP ET, KULLANICIYA GÖSTERME):
+ADIM 1: Soruda geçen TÜM anahtar kelimeleri/kavramları listele (sadece zihninde)
+ADIM 2: Her kavram için şemadaki sütunlarda TAM EŞLEŞMEYİ kontrol et (sadece zihninde)
+ADIM 3: Eğer HERHANGI BIR kavram şemada YOKSA veya FARKLI bir kelimeyse -> BELIRSIZ dön (kullanıcıya sadece düzeltilmiş soruyu öner, teknik detay verme)
+ADIM 4: Eğer tüm kavramlar eşleşiyorsa -> SQL oluştur
+
+ÖNEMLİ: Bu adımları kullanıcıya ASLA gösterme! Sadece BELIRSIZ durumunda kısa ve net bir öneri ver.
+
+## KATKI SEMANTİK KURALLAR (ASLA İHLAL ETME):
+❌ YANLIŞ ÖRNEKLER (ASLA YAPMA):
+1. Soru: "Bankadaki mal varlığı en yüksek kimdir?"
+   → Şemada "banka", "bankadaki", "mal varlığı" kelimesi YOK, sadece "öz_varlık" var
+   → "bankadaki mal varlığı" ≠ "öz_varlık" (FARKLI KAVRAMLAR!)
+   → DOĞRU CEVAP: BELIRSIZ: Serveti en yüksek sanatçı kimdir?
+   → YANLIŞ CEVAP: SELECT ... ORDER BY öz_varlık (BU HALÜSINASYON!)
+   → YANLIŞ CEVAP: Teknik adımları/şema detaylarını göstermek (KULLANICIYA TEKNİK DETAY VERME!)
+
+2. Soru: "Banka hesabındaki para miktarı en yüksek kimdir?"
+   → Şemada "banka", "hesap", "para" kelimesi YOK
+   → DOĞRU CEVAP: BELIRSIZ: Ne sormak istediniz?
+   → YANLIŞ CEVAP: Herhangi bir SQL üretmek (BU HALÜSINASYON!)
+
+3. Soru: "Banka bakiyesi en yüksek kimdir?"
+   → Şemada "banka", "bakiye" kelimesi YOK
+   → DOĞRU CEVAP: BELIRSIZ: Lütfen sorunuzu daha net belirtin.
+   → YANLIŞ CEVAP: SQL üretmek (BU HALÜSINASYON!)
+
+4. Soru: "Maaşı en yüksek kimdir?" (ama şemada "maaş" yok, sadece "gelir" var)
+   → Şemada "maaş" YOK, sadece "gelir" var
+   → "maaş" ≠ "gelir" (benzer ama AYNI DEĞİL!)
+   → DOĞRU CEVAP: BELIRSIZ: Geliri en yüksek olanı mı sormak istediniz?
+   → YANLIŞ CEVAP: SELECT ... ORDER BY gelir (BU HALÜSINASYON!)
+
+✅ DOĞRU ÖRNEKLER:
+1. Soru: "Serveti en yüksek sanatçı kimdir?"
+   → Şemada "öz_varlık" VAR
+   → "servet" = "öz_varlık" (EŞ ANLAMLI, şemada var)
+   → DOĞRU: SELECT isim FROM şarkıcı ORDER BY öz_varlık DESC LIMIT 1;
+
+2. Soru: "Öz varlığı en yüksek kimdir?"
+   → Şemada "öz_varlık" VAR
+   → "öz varlığı" = "öz_varlık" (TAM EŞLEŞİYOR)
+   → DOĞRU: SELECT isim FROM şarkıcı ORDER BY öz_varlık DESC LIMIT 1;
+
+## Ek Kurallar:
 1. SADECE SELECT sorgusu üret (INSERT, UPDATE, DELETE YASAK)
 2. Tablo ve sütun isimlerini şemadaki gibi AYNEN kullan (Türkçe karakterlere dikkat et: ş, ı, ö, ü, ç, ğ)
 3. Gerekirse JOIN, GROUP BY, ORDER BY, LIMIT kullan
-4. Şemada olmayan tablo veya sütun KULLANMA
-5. String karşılaştırmalarında büyük/küçük harf duyarsız karşılaştırma yap: LOWER(sütun) = LOWER('değer') veya sütun COLLATE NOCASE = 'değer'
-6. ÖNEMLİ: Eğer kullanıcının sorduğu bilgi şemada YOKSA (örn: puan, skor, fiyat gibi sütunlar yoksa), sadece "VERI_YOK: [eksik bilgi]" yaz. Yakın bir şey üretme!
+4. ÖNEMLİ: Birden fazla tablo gerekiyorsa MUTLAKA JOIN kullan (INNER JOIN, LEFT JOIN vb.)
+5. ÖNEMLİ: Şemada OLMAYAN tablo veya sütun ASLA KULLANMA. Uydurma, varsayma!
+6. String karşılaştırmalarında büyük/küçük harf duyarsız karşılaştırma yap: LOWER(sütun) = LOWER('değer')
+7. Kabul edilebilir genel eş anlamlılar: satış≈sipariş, müşteri≈alıcı, ürün≈mal, isim≈ad, sayı≈miktar≈adet, servet≈öz_varlık
+8. UYARI: Eş anlamlılar dışındaki tüm kavramlar şemadaki KELIMELERLE TAM EŞLEŞMELİ!
 
 ## Kullanıcı Sorusu:
 {question}
 
-## Cevap (SQL sorgusu VEYA "VERI_YOK: [açıklama]"):
+## Cevap (SQL sorgusu VEYA "BELIRSIZ/VERI_YOK/ALAKASIZ: [açıklama]"):
 ```sql"""
 
         response = self.generate(prompt)
 
         # Extract SQL from response
         sql = response.strip()
+
+        # Check if question is unclear/ambiguous
+        if "BELIRSIZ" in sql.upper():
+            # Extract the clarification question
+            if ":" in sql:
+                clarification = sql.split(":", 1)[1].strip()
+                return f"BELIRSIZ: {clarification}"
+            return "BELIRSIZ: Sorunuz net değil, lütfen daha açık bir şekilde sorun."
+
+        # Check if question is irrelevant
+        if "ALAKASIZ" in sql.upper():
+            # Extract the suggestion if present
+            if ":" in sql:
+                suggestion = sql.split(":", 1)[1].strip()
+                return f"ALAKASIZ: {suggestion}"
+            return "ALAKASIZ: Sorunuz veritabanlarıyla alakalı değil gibi görünüyor."
 
         # Check if LLM says data is not available
         if "VERI_YOK" in sql.upper() or "VERİ_YOK" in sql.upper():
@@ -252,6 +391,48 @@ SQL: [sql_sorgusu]"""
             sql += ";"
 
         return sql
+
+    def generate_explanation(
+        self,
+        question: str,
+        sql: str,
+        row_count: int,
+        db_name: str
+    ) -> str:
+        """Generate a natural language explanation of the query results."""
+        prompt = f"""Sen bir veritabanı asistanısın. Kullanıcının sorusuna verdiğin cevabı açıkla.
+
+## Kullanıcı Sorusu:
+{question}
+
+## Kullanılan Veritabanı:
+{db_name}
+
+## Çalıştırılan SQL Sorgusu:
+{sql}
+
+## Sonuç:
+{row_count} kayıt bulundu.
+
+## Görevin:
+Kullanıcıya KISA ve NET bir açıklama yaz. Sadece şu formatlardan birini kullan:
+
+- Eğer sonuç varsa (row_count > 0):
+  "Sorduğunuz sorunun cevabı:"
+  VEYA
+  "İşte [soruyla ilgili özet] sonuçları:"
+  VEYA
+  "[X] adet kayıt bulundu:"
+
+- Eğer sonuç yoksa (row_count = 0):
+  "Üzgünüm, bu kriterlere uygun sonuç bulunamadı."
+  VEYA
+  "[şema/veritabanı] veritabanında bu bilgi bulunamadı."
+
+SADECE açıklama metnini yaz, başka bir şey ekleme. Maksimum 1 cümle olsun."""
+
+        explanation = self.generate(prompt, temperature=0.3)
+        return explanation.strip()
 
 
 # Singleton instance

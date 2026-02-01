@@ -6,6 +6,8 @@ export interface ChatResponse {
   columns: string[];
   rows: (string | number | null)[][];
   row_count: number;
+  explanation: string;
+  confidence_score: number;
   error: string;
   detection_info: {
     method?: string;
