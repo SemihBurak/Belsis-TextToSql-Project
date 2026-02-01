@@ -7,7 +7,7 @@ load_dotenv()
 
 # Base paths
 BASE_DIR = Path(__file__).parent.parent
-TURSPIDER_DB_PATH = BASE_DIR / "TURSpider database" / "database"
+TURSPIDER_DB_PATH = BASE_DIR / "TURSpider-database" / "database"
 DATA_DIR = Path(__file__).parent / "data"
 SCHEMA_CACHE_DIR = DATA_DIR / "schema_cache"
 CHROMA_DB_DIR = DATA_DIR / "chroma_db"
@@ -17,7 +17,7 @@ SCHEMA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 # Google AI Studio API
-GOOGLE_API_KEY = "AIzaSyBVeZU0XGnHo-9Htac4JsfZPBsBXfOXWmI"
+GOOGLE_API_KEY = ""
 
 # Model settings
 GEMMA_MODEL = "gemma-3-27b-it"  # Fast model with new API key
