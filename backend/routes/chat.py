@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from services.database_detector import get_database_detector
-from services.sql_generator import get_sql_generator
 from services.sql_executor import get_sql_executor
 from services.llm_service import get_llm_service
 from indexing.schema_indexer import get_indexer, ensure_index_built
