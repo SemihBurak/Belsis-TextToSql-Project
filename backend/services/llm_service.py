@@ -84,7 +84,7 @@ Sadece veritabanı ismini yaz, başka bir şey yazma. Örnek: şarkıcı"""
         """Combined: Select database AND generate SQL in one LLM call."""
         # Build candidate descriptions with FULL schema SQL
         candidate_descriptions = []
-        for i, c in enumerate(candidates[:3], 1):  # Top 3 only to save tokens
+        for i, c in enumerate(candidates[:5], 1):  # Top 3 only to save tokens
             db_name = c['name']
             schema = schemas.get(db_name)
             if schema:
