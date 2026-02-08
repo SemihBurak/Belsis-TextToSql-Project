@@ -17,7 +17,7 @@ SCHEMA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 # Google AI Studio API
-GOOGLE_API_KEY = "AIzaSyBoM3LawfUGMxyFFQUsefvTgoH6wORGaH4"
+GOOGLE_API_KEY = ""
 
 # Model settings
 GEMMA_MODEL = "gemma-3-27b-it"  # Fast model with new API key
